@@ -1,0 +1,178 @@
+---
+title: "Machine Learning Project"
+author: "Rafael Daniel"
+date: "3 de abril de 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+# Project goal
+
+The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways to develope a model that can predict when this exercice is done correctly. Once the model is defined with the train set, the 20 cases of the test set will be used to test the model.
+
+# Data Source
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r load data}
+# load train and test sets from the website
+train<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+classe<-train$classe
+
+test<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+```
+
+# Clean and select features
+
+1. From the train set the features that contain NA values are removed
+```{r remove NA containing features}
+isna<-colSums(is.na(train))
+# the following 63 features contain NA values and are removed
+print("NA containing fetatures:")
+names(train[isna!=0])
+
+train<-train[-isna==0]
+```
+
+2. From the remaining features there are factor variables that are actually numbers that were converted into factor as contain "#?DIV/0!" values, these features are removed from the training set.
+```{r remove factor features}
+# factor observables
+
+train<-train[-which(sapply(train, is.factor))]
+
+```
+
+3. All the features not relate with one of the devices are also removed from the set
+```{r remove non device related features}
+# select observables related with the devices
+belt_var<-grep(pattern = "_belt",x = names(train),value = T)
+arm_var<-grep(pattern = "_arm",x = names(train),value = T)
+farm_var<-grep(pattern = "_forearm",x = names(train),value = T)
+dum_var<-grep(pattern = "_dumbbell",x = names(train),value = T)
+
+train<-train[c(belt_var,arm_var,farm_var,dum_var)]
+train$classe<-classe
+
+```
+
+4. At this point the 159 features are now reduced to the following 52 features.
+```{r features}
+names(train)
+```
+
+# Data visualization
+The following plots show a general idea of the data relationship for each device. Nothing can be concluded from these plots therefore are not printed to simplify the document.However plots are published in the plots folder in this repository.
+```{r data plots, eval=FALSE, include=FALSE}
+
+library(caret)
+
+set.seed(123)
+#sample 50 points of the training set
+sdata<-train[sample(1:19622,50),]
+
+featurePlot(x=sdata[,belt_var],y=sdata$classe,plot = "pairs", col=c("green","blue","red","cyan","black"), fill=c("green","blue","red","cyan","grey"),alpha=0.3,pch=c(16,16,16,16,16), main="belt")
+
+featurePlot(x=sdata[,arm_var],y=sdata$classe,plot = "pairs", col=c("green","blue","red","cyan","black"), fill=c("green","blue","red","cyan","grey"),alpha=0.3,pch=c(16,16,16,16,16), main="arm")
+
+featurePlot(x=sdata[,farm_var],y=sdata$classe,plot = "pairs", col=c("green","blue","red","cyan","black"), fill=c("green","blue","red","cyan","grey"),alpha=0.3,pch=c(16,16,16,16,16), main="forearm")
+
+featurePlot(x=sdata[,dum_var],y=sdata$classe,plot = "pairs", col=c("green","blue","red","cyan","black"), fill=c("green","blue","red","cyan","grey"),alpha=0.3,pch=c(16,16,16,16,16), main="dumbbelt")
+
+```
+
+
+# Model selection
+To get a more accurate model estimate 10 fod cross validation will be used in all the models. Accuracy will be used to measure the model fit in all cases.
+```{r model }
+require(caret)
+control<-trainControl(method="cv", number=10)
+metric<-"Accuracy"
+```
+
+We will adjutst a k means clustering and tree model for each different device, both methods are quite easy and fast to compute.
+```{r adjust models for each device}
+use_md<-c("rpart","knn")
+devices<-list(belt=belt_var,arm=arm_var,farm=farm_var,dum=dum_var)
+
+adj_md_dv<-list()
+
+for (d in 1:4){
+  #subset train data for the selelected device
+  data<-train[devices[[d]]]
+  data$classe<-classe
+  #print (names(devices)[d]) this allows to control which device is being computed
+  
+  for (i in use_md){
+      #calculate each model for the selected device
+      #print(paste("Model:",i)) this allows to control which model is being computed
+    
+      set.seed(123)
+      lbl<-paste(names(devices)[d],i)
+      adj_md_dv[[lbl]]<-train(classe~.,method=i,data=data,trControl=control, metric=metric)
+  }
+}
+
+summary(resamples(adj_md_dv))
+```
+
+Looking at the models, the best devices to predict are dumbelt,farm and belt. Nevetheless accuracy is very low when only one device is considered. K means clustering performs better than the tree model in this case.
+
+We will adjutst a k means clustering and tree model for each different measure.
+```{r adjust models for each measure}
+use_md<-c("rpart","knn")
+mnames<-c("^gyros_","^magnet_","^roll_","^pitch_","^yaw_","^accel_","^total_accel_")
+
+measures<-lapply(X = mnames,FUN = function(namepattern) grep(pattern = namepattern,x = names(train),value = T) )
+
+adj_md_meas<-list()
+
+for (d in 1:7){
+  #subset train data for the selelected measure
+  data<-train[measures[[d]]]
+  data$classe<-classe
+  #print (d) this allows to control which device is being computed
+  
+  for (i in use_md){
+      #calculate each model for the selected device
+      #print(paste("Model:",i)) this allows to control which model is being computed
+    
+      set.seed(123)
+      lbl<-paste(d,i)
+      adj_md_meas[[lbl]]<-train(classe~.,method=i,data=data,trControl=control, metric=metric)
+  }
+}
+
+summary(resamples(adj_md_meas))
+```
+
+Looking at the model the best accuracy is reach with magnet(2),acceleration(6) and gyros(1)
+
+Will focus on magnet and acceleration and gyros measurements of all devices. Using K-means clustering we get and accuracy of 91.2%
+```{r final knn model}
+data<-train[c(measures[[1]],measures[[2]],measures[[6]])]
+data$classe<-classe
+
+set.seed(123)
+select_md_meas<-train(classe~.,method="knn",data=data,trControl=control, metric=metric)
+print(select_md_meas)
+pred.test<-predict(select_md_meas,test)
+```
+
+# Prediction
+We use the K-menas clustering model to predict the data of the test set. Estimated prediction accuracy is 91.2%. Prediction is saved in .csv format for further checking.
+```{r prediction}
+pred.test
+write.csv(file="prediction.csv",x = pred.test)
+
+```
+
+
